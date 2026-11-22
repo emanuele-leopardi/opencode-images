@@ -37,6 +37,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -106,3 +107,7 @@ jobs:
             echo
             echo "Pin the clusters' manifests to \`${{ steps.meta.outputs.primary }}\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+# Action trigger test: the first push happened seconds after the repository
+# was created and produced no workflow run; this comment re-fires the same
+# build from an established default branch.
