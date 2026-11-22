@@ -7,7 +7,7 @@ laptop.
 | image | context | used by |
 |---|---|---|
 | `ghcr.io/emanuele-leopardi/opencode-agent` | `agent/` | the headless `opencode serve` in each cluster |
-| `ghcr.io/emanuele-leopardi/zen-bridge` | `zen-bridge/` | the keyless client that Zen attests |
+| `ghcr.io/emanuele-leopardi/zen-bridge` | `zen-bridge/` | the opencode client the bridge drives on the cluster's behalf |
 
 ## How it builds
 
@@ -44,21 +44,17 @@ sed -i 's#\(opencode-agent\|zen-bridge\):2026-11-21#\1:2026-11-22#' \
   clusters/oracle-ema/apps/local/opencode/{agent,bridge,refresh}.yaml
 ```
 
-### Packages must be pullable anonymously
+### Packages are pulled anonymously
 
 The cluster manifests carry no `imagePullSecrets`, so the pods pull GHCR
-**anonymously** and the packages must be **public**. A package pushed from a
-private repo starts private; set it public once, per package:
+without credentials. This repository is **public**, and GHCR packages pushed
+from a public repo inherit public visibility — so the two packages
+(`opencode-agent`, `zen-bridge`) are pullable by the clusters as-is, and the
+first successful build makes them show up under *Packages*.
 
-```
-GitHub → your profile → Packages → opencode-agent → Package settings → Change visibility → Public
-GitHub → your profile → Packages → zen-bridge     → Package settings → Change visibility → Public
-```
-
-(Alternative, if you would rather keep them private: add an
-`imagePullSecret` with a `read:packages` token to each cluster's
-`opencode` namespace and reference it from the Deployments. Not done here
-because it would put a registry credential in every cluster.)
+(If the repo is ever made private, either set each package to public under
+*Package settings → Change visibility*, or add an `imagePullSecret` with a
+`read:packages` token to the clusters' `opencode` namespace.)
 
 ## Relationship to `llm/agent` and `llm/zen-bridge`
 
