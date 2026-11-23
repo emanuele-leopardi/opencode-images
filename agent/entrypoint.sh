@@ -46,6 +46,15 @@ if ! printf '%s' "$model_json" | jq -e --arg m "$MODEL_DEFAULT" 'index($m)' >/de
   MODEL_DEFAULT=$(printf '%s' "$model_json" | jq -r '.[0]')
 fi
 
+# The bridge is the agent's ONLY upstream: expose no other provider.
+# Without this the built-in `opencode` (Zen-direct) and `openai` providers
+# stay enabled, so the model picker lists ~90 dead entries and 7 of the bridge
+# ids appear twice (e.g. opencode/deepseek-v4.1-flash-free next to
+# zen/deepseek-v4.1-flash-free). The agent's NetworkPolicy forbids public
+# egress, so picking any built-in one fails with the misleading
+# "ECONNREFUSED: Unable to connect. Is the computer able to access the url?"
+# (reproduced with opencode v2.2.7). Allowlisting `zen` keeps the picker to
+# exactly the bridge roster.
 jq -n \
   --arg base "$BRIDGE_URL" \
   --arg default "$MODEL_DEFAULT" \
@@ -53,6 +62,7 @@ jq -n \
   '{
     "$schema": "https://opencode.ai/config.json",
     "model": ("zen/" + $default),
+    "enabled_providers": ["zen"],
     "permission": {
       "read": {
         "*": "allow",
