@@ -44,14 +44,43 @@ The agent's generated config exposes exactly two providers:
   can be upgraded freely.
 - `opencode` — Zen **direct**, via opencode's built-in provider
   (`https://opencode.ai/inference/openai/v1`). It serves as a fallback when the
-  bridge is down, and because the image fetches the live `models.dev` catalogue
-  its roster updates without a restart — handy to spot a bridge id Zen has
-  dropped.
+  bridge is down, and its `models.dev` catalogue (fetched when the server
+  starts) is where a newly published free id can appear first.
 
 Everything else (notably the keyless `openai` provider) is filtered out with
 `enabled_providers`. For the Zen-direct path to work the agent's NetworkPolicy
 must allow public HTTPS; it does so without widening access to cluster
-services or the LAN (private ranges are excluded).
+services, the LAN or the cloud instance-metadata endpoint (private, link-local
+and CGNAT ranges are excluded).
+
+`webfetch` is **allowed**, and limited by that same NetworkPolicy rather than
+by the tool: public HTTPS only, no port 80. Reading a changelog, a CVE or an
+API doc is the point; it is also the one tool that can send bytes to a host the
+model names, so it must not reach the cluster, the LAN or the metadata IP.
+
+## Model roster refresh (no restart)
+
+Zen publishes and retires free ids without notice. The agent therefore
+re-renders `opencode.json` from the bridge's roster **inside the pod**:
+
+- `entrypoint.sh` renders once at boot (retrying ~60 s for the bridge, then
+  falling back to `MODEL_DEFAULT` rather than crashlooping), then loops every
+  `MODEL_REFRESH_SECONDS` (900 s, matching the bridge's own allowlist refresh).
+- If the roster did not change, nothing is written. If it did, the new file is
+  written beside the old one and swapped in with an atomic `mv`.
+- opencode watches that file and hot-reloads it in ~0.4 s, **same process** — so
+  a roster change never interrupts a session that is in flight, and the
+  sessions PVC is not touched.
+- A bridge outage during the loop keeps the config already being served; it
+  only blocks a *first* start with the pinned default.
+- Each render that changes the file prints the full JSON to the container log
+  (`kubectl logs`), which is how the config actually being served can be read
+  back: it lives on the pod's filesystem, so RBAC cannot reach it, and
+  exec/port-forward are deliberately not granted.
+
+There is no CronJob and no pod deletion: the old 6-hourly restart is gone. The
+`MODEL_DEFAULT` pin is never overwritten — if Zen retires it, each render falls
+back to the first id in the roster for that render only.
 
 ## Consuming it from the clusters
 
@@ -62,8 +91,8 @@ build bump that tag and push:
 
 ```
 # example: move ema to the image built on 2026-11-22
-sed -i 's#\(opencode-agent\|zen-bridge\):2026-11-21#\1:2026-11-22#' \
-  clusters/oracle-ema/apps/local/opencode/{agent,bridge,refresh}.yaml
+sed -i 's#opencode-agent:2026-11-21#opencode-agent:2026-11-22#' \
+  clusters/oracle-ema/apps/local/opencode/agent.yaml
 ```
 
 ### Packages are pulled anonymously

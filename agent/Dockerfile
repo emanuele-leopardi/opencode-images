@@ -31,6 +31,7 @@ ENV OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION} \
     BRIDGE_URL=http://zen-bridge:8099/v1 \
     MODEL_DEFAULT=deepseek-v4.1-flash-free \
     MODEL_DENYLIST=jev-1.13-free \
+    MODEL_REFRESH_SECONDS=900 \
     AGENT_PORT=4096 \
     HOME=/home/node \
     OPENCODE_DISABLE_AUTOUPDATE=1 \
