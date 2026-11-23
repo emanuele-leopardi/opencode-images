@@ -6,9 +6,11 @@ name: build-images
 #   ghcr.io/emanuele-leopardi/opencode-agent:<tag>
 #   ghcr.io/emanuele-leopardi/zen-bridge:<tag>
 #
-# <tag> is the UTC date of the build (e.g. 2026-11-22) unless overridden when
-# dispatched by hand. The clusters' manifests pin that immutable date tag;
-# `latest` and `sha-<short>` are published as a convenience.
+# <tag> is the UTC date plus the workflow run number (e.g. 2026-11-23.3)
+# unless overridden when dispatched by hand. The run suffix keeps same-day
+# rebuilds unique: moving a tag the clusters already pulled would not make
+# containerd re-fetch it under imagePullPolicy: IfNotPresent. The clusters pin
+# this immutable tag; `latest` and `sha-<short>` are published as a convenience.
 #
 # Uses only the automatic GITHUB_TOKEN (permissions.packages: write), so no
 # repository secret is required.
@@ -70,7 +72,10 @@ jobs:
           set -euo pipefail
           tag='${{ inputs.tag }}'
           if [ -z "$tag" ]; then
-            tag="$(date -u +%Y-%m-%d)"
+            # Date prefix for humans, run suffix for uniqueness: a second
+            # build on the same day must not overwrite a tag the clusters
+            # already pinned (containerd would keep the cached digest).
+            tag="$(date -u +%Y-%m-%d).${GITHUB_RUN_NUMBER}"
           fi
           short="sha-${GITHUB_SHA::7}"
           base="${REGISTRY}/${{ github.repository_owner }}/${{ matrix.image }}"

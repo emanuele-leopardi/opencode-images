@@ -21,15 +21,37 @@ Tags published per build:
 
 | tag | meaning |
 |---|---|
-| `<YYYY-MM-DD>` | immutable date tag — **this is what the clusters pin** |
+| `<YYYY-MM-DD>.<run>` | immutable build tag — **this is what the clusters pin** |
 | `sha-<short>` | the commit it was built from |
 | `latest` | most recent build |
+
+The `.<run>` suffix exists so a second build on the same day gets a **new**
+tag. Re-pointing a tag the clusters already pulled would be a silent no-op:
+containerd keeps the cached digest under `imagePullPolicy: IfNotPresent`.
 
 Hand-dispatch with a tag when you want to reproduce an older date:
 
 ```
 Actions → build-images → Run workflow → tag: 2026-11-21
 ```
+
+## Agent upstreams
+
+The agent's generated config exposes exactly two providers:
+
+- `zen` — the per-cluster `zen-bridge` (`http://zen-bridge:8099/v1`), the
+  default. The bridge is the genuine client Zen attests, so the agent's own CLI
+  can be upgraded freely.
+- `opencode` — Zen **direct**, via opencode's built-in provider
+  (`https://opencode.ai/inference/openai/v1`). It serves as a fallback when the
+  bridge is down, and because the image fetches the live `models.dev` catalogue
+  its roster updates without a restart — handy to spot a bridge id Zen has
+  dropped.
+
+Everything else (notably the keyless `openai` provider) is filtered out with
+`enabled_providers`. For the Zen-direct path to work the agent's NetworkPolicy
+must allow public HTTPS; it does so without widening access to cluster
+services or the LAN (private ranges are excluded).
 
 ## Consuming it from the clusters
 

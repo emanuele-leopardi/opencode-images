@@ -46,15 +46,17 @@ if ! printf '%s' "$model_json" | jq -e --arg m "$MODEL_DEFAULT" 'index($m)' >/de
   MODEL_DEFAULT=$(printf '%s' "$model_json" | jq -r '.[0]')
 fi
 
-# The bridge is the agent's ONLY upstream: expose no other provider.
-# Without this the built-in `opencode` (Zen-direct) and `openai` providers
-# stay enabled, so the model picker lists ~90 dead entries and 7 of the bridge
-# ids appear twice (e.g. opencode/deepseek-v4.1-flash-free next to
-# zen/deepseek-v4.1-flash-free). The agent's NetworkPolicy forbids public
-# egress, so picking any built-in one fails with the misleading
-# "ECONNREFUSED: Unable to connect. Is the computer able to access the url?"
-# (reproduced with opencode v2.2.7). Allowlisting `zen` keeps the picker to
-# exactly the bridge roster.
+# Two providers, on purpose:
+#   zen      -- the bridge. The default: it owns Zen attestation, so the agent
+#               can keep upgrading its CLI without losing the free tier.
+#   opencode -- Zen direct through the built-in provider. It needs public
+#               HTTPS (the NetworkPolicy allows it) and buys two things: a
+#               fallback when the bridge is down, and models.dev's LIVE roster
+#               to compare against the bridge's (frozen at pod start) to spot
+#               ids Zen has dropped.
+# Everything else -- notably the keyless `openai` provider -- stays hidden: it
+# has no credentials and only adds dead entries to the picker. Allowlisting
+# by name also means a future built-in provider does not leak in.
 jq -n \
   --arg base "$BRIDGE_URL" \
   --arg default "$MODEL_DEFAULT" \
@@ -62,7 +64,7 @@ jq -n \
   '{
     "$schema": "https://opencode.ai/config.json",
     "model": ("zen/" + $default),
-    "enabled_providers": ["zen"],
+    "enabled_providers": ["zen", "opencode"],
     "permission": {
       "read": {
         "*": "allow",

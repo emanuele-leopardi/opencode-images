@@ -22,8 +22,11 @@ RUN npm install -g @opencode/cli@${OPENCODE_CLI_VERSION}
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# The agent must never reach Zen directly or update itself: its only
-# upstream is the bridge, which owns attestation and the roster.
+# The agent must not update itself (the image tag is the unit of upgrade), but
+# it MAY reach Zen directly: that is the fallback path when the bridge is
+# down, and models.dev's live catalogue is what reveals a bridge id Zen has
+# dropped. The NetworkPolicy allows public HTTPS for exactly that; if the
+# fetch fails opencode silently falls back to its bundled snapshot.
 ENV OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION} \
     BRIDGE_URL=http://zen-bridge:8099/v1 \
     MODEL_DEFAULT=deepseek-v4.1-flash-free \
@@ -31,7 +34,6 @@ ENV OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION} \
     AGENT_PORT=4096 \
     HOME=/home/node \
     OPENCODE_DISABLE_AUTOUPDATE=1 \
-    OPENCODE_DISABLE_MODELS_FETCH=1 \
     XDG_CONFIG_HOME=/home/node/.config \
     XDG_DATA_HOME=/home/node/.local/share \
     XDG_STATE_HOME=/tmp/state \
