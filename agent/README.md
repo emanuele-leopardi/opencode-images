@@ -22,7 +22,10 @@ and still reach the free tier.
 
 ## Images
 
-Built from this directory, pushed to GHCR:
+Built by CI in the public repo `emanuele-leopardi/opencode-images` (multi-arch
+Buildx → GHCR) with the tag `<YYYY-MM-DD>.<run>`, which is what the clusters
+pin. This directory holds the same sources; build here only as an offline
+fallback (Docker Buildx, not inside the agent container), pushing to GHCR:
 
 | image | Dockerfile | arch |
 |---|---|---|
@@ -54,24 +57,25 @@ Nothing bakes the free roster into the agent:
    sees an unknown id.
 2. `entrypoint.sh` asks the bridge's `/v1/models` at pod start and renders
    `opencode.json` with exactly those ids, minus `MODEL_DENYLIST` (default
-   `jev-1.13-free`, a SystemOne decision model the chat client refuses). A
-   pinned `MODEL_DEFAULT` that no longer exists is replaced by the first
-   available id.
-3. A 6-hourly CronJob (`refresh.yaml`) asks the **running agent** for its own
-   `/api/model` list and hashes it. When the hash differs from the
-   `opencode-roster` ConfigMap, the ConfigMap is updated and the agent pod is
-   deleted; the Deployment recreates it with a freshly rendered config. The
-   bridge's `/v1/models` is the fallback when the agent is not answering.
+   `jev-1.13-free`, a SystemOne decision model the chat client refuses).
+3. The same script then re-renders every `MODEL_REFRESH_SECONDS` (900),
+   **inside the pod**. If the roster is unchanged nothing is written; if it
+   moved, the file is replaced with an atomic `mv` and opencode hot-reloads it
+   in ~0.4 s — same PID, so a session that is generating is not interrupted.
+4. A bridge outage during the loop keeps the config already being served, so a
+   blip cannot shrink the picker. Only a first start falls back to
+   `MODEL_DEFAULT` alone (then recovers on the next successful render).
 
-The agent is hashed, not the bridge, on purpose: the image also fetches
-`models.dev` at pod start, so a new free id can appear there without the
-bridge ever hearing about it. Hashing the agent's own list is the honest one —
-it is what the running server would actually offer.
+`MODEL_DEFAULT` is a pin: it is never overwritten. If Zen retires it, each
+render falls back to the first id in the roster *for that render only*, so the
+pin comes back if Zen restores it. A pinned default that no longer exists must
+not be the first turn's 404.
 
-The CronJob deletes the pod instead of patching the Deployment on purpose:
-Flux owns the Deployment and would revert a runtime annotation within its
-1-minute reconcile loop, causing a rollout every cycle. It needs one secret
-read (`opencode-agent` → `password`) to ask the agent for its list.
+There is **no CronJob and no pod deletion**. The old 6-hourly refresh deleted
+the agent pod to force a re-render; with the config hot-reloaded, that would
+throw away in-flight work for nothing. Each render that changes the file prints
+the full JSON to the container log, which is how the served config can be read
+back without exec (`kubectl logs` is already read-only).
 
 ## Security model
 
@@ -82,19 +86,26 @@ read (`opencode-agent` → `password`) to ask the agent for its list.
   paths are `/tmp`, `/home/node/.config` (rendered each start), `/home/node`
   (scratch cwd), and the PVC at `/home/node/.local/share` (sessions DB).
 - The agent's bash permission is `*: deny` plus `kubectl` / `kubectl *:
-  allow`. `edit`, `write`, and `webfetch` are denied. Cluster changes remain
-  GitOps + human-approved.
+  allow`. `edit` and `write` are denied; `webfetch` is **allowed** (an agent
+  that cannot open a page cannot check a changelog or a CVE) and is limited by
+  the NetworkPolicy instead: public HTTPS only, no port 80, with private,
+  link-local and CGNAT ranges excluded, so it cannot reach cluster services,
+  the LAN or the cloud metadata endpoint. Cluster changes remain GitOps +
+  human-approved.
 - `OPENCODE_SERVER_PASSWORD` comes from the `opencode-agent` Secret. The
   server is reachable only by port-forward (or a deliberate Service/Ingress);
   without the password it answers 401.
-- NetworkPolicy: only the agent and the refresh CronJob may reach the bridge;
-  the bridge may reach DNS and public 443 only; the agent may reach DNS, the
-  bridge, the Kubernetes API, and public 443 (Zen-direct + models.dev: the
-  fallback path and the live roster). Private ranges stay excluded.
+- NetworkPolicy: only the agent may reach the bridge; the bridge may reach DNS
+  and public 443 only; the agent may reach DNS, the bridge, the Kubernetes API,
+  and public 443 (Zen-direct, models.dev and webfetch: the fallback path, the
+  live catalogue and the fetch tool). Private, link-local and CGNAT ranges stay
+  excluded, and port 80 is not allowed.
 
 ## Deploy (per cluster)
 
-Manifests live in `home-clusters/clusters/<cluster>/apps/opencode/`:
+Manifests live in `home-clusters`, at
+`clusters/<cluster>/apps/{opencode,local/opencode}/` (`local/` on the Oracle
+clusters, top level on `htpc`):
 
 ```sh
 # 1. Secret (never in git; the Deployment waits for it)
