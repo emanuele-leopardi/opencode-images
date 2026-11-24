@@ -480,13 +480,30 @@ def call_cli(model, prompt):
             # Popen + killpg rather than subprocess.run(timeout=...): run() kills
             # only the direct child, and with start_new_session=True any descendant
             # it spawned used to survive the timeout as an orphan.
-            proc = subprocess.Popen(
-                ["opencode", "run", "-m", f"opencode/{model}",
-                 "--format", "json", prompt],
-                cwd=workdir, env=env, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, start_new_session=True)
+            #
+            # The prompt goes on STDIN, never in argv (2026-11-24). `opencode run`
+            # takes the message from stdin when no positional argument is given,
+            # and Linux caps a single argv entry at MAX_ARG_STRLEN (128 KiB):
+            # passing the prompt as an argument made every conversation larger
+            # than ~128 KB raise `OSError: [Errno 7] Argument list too long`,
+            # which escaped do_POST uncaught and reached the client as an empty
+            # reply (litellm logs it as 500 InternalServerError / Connection
+            # error). A real agent session is hundreds of KB, so this bit hard
+            # on exactly the sessions people care about.
             try:
-                out, errout = proc.communicate(timeout=RUN_TIMEOUT)
+                proc = subprocess.Popen(
+                    ["opencode", "run", "-m", f"opencode/{model}",
+                     "--format", "json"],
+                    cwd=workdir, env=env, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, start_new_session=True)
+            except OSError as e:
+                # Never let a spawn failure escape as an empty reply: hand the
+                # caller a real error string so do_POST can send a 502.
+                return "", {}, f"spawn failed: {type(e).__name__}: {e}"
+            try:
+                out, errout = proc.communicate(input=prompt,
+                                               timeout=RUN_TIMEOUT)
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
